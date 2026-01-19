@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Nav from './Nav';
 import AuthModal from './AuthModal';
+import AuthService from '../../Utils/AuthService';
+import "../../assets/UserDropdown.css";
 
 export default function Header3({ variant }) {
   const [mobileToggle, setMobileToggle] = useState(false);
@@ -9,6 +11,43 @@ export default function Header3({ variant }) {
   const [prevScrollPos, setPrevScrollPos] = useState(0);
   const [searchToggle, setSearchToggle] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const navigate = useNavigate();
+
+  // Check login status
+  useEffect(() => {
+    const checkLoginStatus = () => {
+      const loggedIn = AuthService.isLoggedIn();
+      const user = AuthService.getCurrentUser();
+      setIsLoggedIn(loggedIn);
+      setCurrentUser(user);
+    };
+
+    checkLoginStatus();
+    
+    // Listen for storage changes (when user logs in from another tab)
+    window.addEventListener('storage', checkLoginStatus);
+    
+    return () => {
+      window.removeEventListener('storage', checkLoginStatus);
+    };
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (userDropdownOpen && !event.target.closest('.user-dropdown-container')) {
+        setUserDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [userDropdownOpen]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -24,11 +63,31 @@ export default function Header3({ variant }) {
     };
 
     window.addEventListener('scroll', handleScroll);
-
     return () => {
       window.removeEventListener('scroll', handleScroll);
     };
   }, [prevScrollPos]);
+
+  const handleUserIconClick = () => {
+    if (isLoggedIn) {
+      setUserDropdownOpen(!userDropdownOpen);
+    } else {
+      setAuthModalOpen(true);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await AuthService.logout();
+      setIsLoggedIn(false);
+      setCurrentUser(null);
+      setUserDropdownOpen(false);
+      navigate('/');
+      window.location.reload(); // Reload để reset toàn bộ state
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
 
   return (
     <div>
@@ -58,9 +117,35 @@ export default function Header3({ variant }) {
                     <i className="bi bi-cart3"></i>
                     <span className="cart-badge">3</span>
                   </Link>
-                  <button onClick={() => setAuthModalOpen(true)} className="header-icon-btn login-icon-btn">
-                    <i className="bi bi-person-circle"></i>
-                  </button>
+                  
+                  {/* User Icon with Dropdown */}
+                  <div className="user-dropdown-container">
+                    <button onClick={handleUserIconClick} className={`header-icon-btn login-icon-btn ${isLoggedIn ? 'logged-in' : ''}`}>
+                      <i className="bi bi-person-circle"></i>
+                    </button>
+                    
+                    {isLoggedIn && userDropdownOpen && (
+                      <div className="user-dropdown">
+                        <div className="user-dropdown-header">
+                          <div className="user-avatar">
+                            <i className="bi bi-person-circle"></i>
+                          </div>
+                          <div className="user-info">
+                            <p className="user-name">{currentUser?.fullName || 'User'}</p>
+                          </div>
+                        </div>
+                        <div className="user-dropdown-divider"></div>
+                        <Link to="/profile" className="user-dropdown-item" onClick={() => setUserDropdownOpen(false)}>
+                          <i className="bi bi-person"></i>
+                          <span>Profile</span>
+                        </Link>
+                        <button className="user-dropdown-item logout-item" onClick={handleLogout}>
+                          <i className="bi bi-box-arrow-right"></i>
+                          <span>Logout</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

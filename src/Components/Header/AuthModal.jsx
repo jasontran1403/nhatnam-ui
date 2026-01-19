@@ -1,25 +1,76 @@
 import { useState } from 'react';
+import AuthService from '../../Utils/AuthService';
+import { STATUS_CODE } from '../../Utils/constants/apiEndpoints';
+import Toast from '../../Components/Toast/Toast';
 import '../../assets/AuthModal.css';
 
 export default function AuthModal({ isOpen, onClose }) {
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [toast, setToast] = useState(null);
   
-  // Login form state
+  // Password visibility states
+  const [showPassword, setShowPassword] = useState({
+    login: false,
+    register: false,
+    confirm: false
+  });
+  
   const [loginData, setLoginData] = useState({
-    emailOrPhone: '',
+    username: '',
     password: ''
   });
 
-  // Register form state
   const [registerData, setRegisterData] = useState({
     fullName: '',
+    username: '',
     email: '',
     phoneNumber: '',
     password: '',
     confirmPassword: ''
   });
+
+  // Format phone number
+  const formatPhoneNumber = (value) => {
+    // Remove all non-digit characters
+    let numbers = value.replace(/\D/g, '');
+    
+    // If starts with 0, replace with +84
+    if (numbers.startsWith('0')) {
+      numbers = '84' + numbers.substring(1);
+    }
+    
+    // If doesn't start with 84, add it
+    if (!numbers.startsWith('84') && numbers.length > 0) {
+      numbers = '84' + numbers;
+    }
+    
+    // Format: +84 xxx xxx xxx
+    let formatted = '';
+    if (numbers.length > 0) {
+      formatted = '+84';
+      const remaining = numbers.substring(2);
+      
+      if (remaining.length > 0) {
+        formatted += ' ' + remaining.substring(0, 3);
+      }
+      if (remaining.length > 3) {
+        formatted += ' ' + remaining.substring(3, 6);
+      }
+      if (remaining.length > 6) {
+        formatted += ' ' + remaining.substring(6, 9);
+      }
+    }
+    
+    return formatted;
+  };
+
+  const handlePhoneChange = (e) => {
+    const input = e.target.value;
+    const formatted = formatPhoneNumber(input);
+    setRegisterData({ ...registerData, phoneNumber: formatted });
+  };
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
@@ -27,28 +78,19 @@ export default function AuthModal({ isOpen, onClose }) {
     setError('');
 
     try {
-      const response = await fetch('http://localhost:8080/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(loginData),
-      });
+      const result = await AuthService.login(loginData);
 
-      const result = await response.json();
-
-      if (result.code === 902) {
-        // Success
-        localStorage.setItem('token', result.data.token);
-        localStorage.setItem('user', JSON.stringify(result.data.user));
-        alert(result.message);
-        onClose();
-        window.location.reload();
+      if (result.code === STATUS_CODE.SUCCESS) {
+        setToast({ message: result.message || 'Login successfully', type: 'success' });
+        setTimeout(() => {
+          onClose();
+          window.location.reload();
+        }, 1500);
       } else {
-        setError(result.message);
+        setError(result.message || 'Login failed');
       }
     } catch (err) {
-      setError('Login failed. Please try again.');
+      setError(err.message || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -59,6 +101,14 @@ export default function AuthModal({ isOpen, onClose }) {
     setLoading(true);
     setError('');
 
+    // Validate password length
+    if (registerData.password.length < 6) {
+      setError('Password must be at least 6 characters');
+      setLoading(false);
+      return;
+    }
+
+    // Validate password match
     if (registerData.password !== registerData.confirmPassword) {
       setError('Passwords do not match');
       setLoading(false);
@@ -66,30 +116,39 @@ export default function AuthModal({ isOpen, onClose }) {
     }
 
     try {
-      const response = await fetch('http://localhost:8080/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          fullName: registerData.fullName,
-          email: registerData.email,
-          phoneNumber: registerData.phoneNumber,
-          password: registerData.password,
-        }),
+      // Remove spaces from phone number before sending
+      const phoneNumberClean = registerData.phoneNumber.replace(/\s/g, '');
+      
+      const result = await AuthService.register({
+        fullName: registerData.fullName,
+        username: registerData.username,
+        email: registerData.email,
+        phoneNumber: phoneNumberClean,
+        password: registerData.password,
       });
 
-      const result = await response.json();
+      if (result.code === STATUS_CODE.SUCCESS) {
+        setToast({ message: result.message || 'Register successfully', type: 'success' });
+        
+        // Clear form
+        setRegisterData({
+          fullName: '',
+          username: '',
+          email: '',
+          phoneNumber: '',
+          password: '',
+          confirmPassword: ''
+        });
 
-      if (result.code === 901) {
-        // Success
-        alert(result.message);
-        setIsLogin(true); // Switch to login form
+        // Switch to login after 1.5s
+        setTimeout(() => {
+          setIsLogin(true);
+        }, 1500);
       } else {
-        setError(result.message);
+        setError(result.message || 'Registration failed');
       }
     } catch (err) {
-      setError('Registration failed. Please try again.');
+      setError(err.message || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -98,210 +157,207 @@ export default function AuthModal({ isOpen, onClose }) {
   if (!isOpen) return null;
 
   return (
-    <div className={`auth-modal-overlay ${isOpen ? 'active' : ''}`} onClick={onClose}>
-      <div className={`auth-modal ${isOpen ? 'active' : ''}`} onClick={(e) => e.stopPropagation()}>
-        <button className="auth-modal-close" onClick={onClose}>
-          <i className="bi bi-x-lg"></i>
-        </button>
+    <>
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      
+      <div className={`auth-modal-overlay ${isOpen ? 'active' : ''}`} onClick={onClose}>
+        <div className={`auth-modal ${isOpen ? 'active' : ''}`} onClick={(e) => e.stopPropagation()}>
+          <button className="auth-modal-close" onClick={onClose}>
+            <i className="bi bi-x-lg"></i>
+          </button>
 
-        <div className="auth-modal-content">
-          {/* Tabs */}
-          <div className="auth-tabs">
-            <button
-              className={`auth-tab ${isLogin ? 'active' : ''}`}
-              onClick={() => {
-                setIsLogin(true);
-                setError('');
-              }}
-            >
-              Login
-            </button>
-            <button
-              className={`auth-tab ${!isLogin ? 'active' : ''}`}
-              onClick={() => {
-                setIsLogin(false);
-                setError('');
-              }}
-            >
-              Register
-            </button>
-          </div>
-
-          {/* Error Message */}
-          {error && (
-            <div className="auth-error">
-              <i className="bi bi-exclamation-circle"></i> {error}
+          <div className="auth-modal-content">
+            <div className="auth-tabs">
+              <button className={`auth-tab ${isLogin ? 'active' : ''}`} onClick={() => { setIsLogin(true); setError(''); }}>
+                Login
+              </button>
+              <button className={`auth-tab ${!isLogin ? 'active' : ''}`} onClick={() => { setIsLogin(false); setError(''); }}>
+                Register
+              </button>
             </div>
-          )}
 
-          {/* Login Form */}
-          {isLogin ? (
-            <form className="auth-form" onSubmit={handleLoginSubmit}>
-              <div className="auth-form-group">
-                <label>Email or Phone</label>
-                <div className="input-with-icon">
-                  <i className="bi bi-envelope"></i>
-                  <input
-                    type="text"
-                    placeholder="Enter your email or phone"
-                    value={loginData.emailOrPhone}
-                    onChange={(e) =>
-                      setLoginData({ ...loginData, emailOrPhone: e.target.value })
-                    }
-                    required
-                  />
+            {error && (
+              <div className="auth-error">
+                <i className="bi bi-exclamation-circle"></i> {error}
+              </div>
+            )}
+
+            {isLogin ? (
+              <form className="auth-form" onSubmit={handleLoginSubmit}>
+                <div className="auth-form-group">
+                  <label>Username</label>
+                  <div className="input-with-icon">
+                    <i className="bi bi-person"></i>
+                    <input 
+                      type="text" 
+                      placeholder="Enter your username" 
+                      value={loginData.username} 
+                      onChange={(e) => setLoginData({ ...loginData, username: e.target.value })} 
+                      required 
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className="auth-form-group">
-                <label>Password</label>
-                <div className="input-with-icon">
-                  <i className="bi bi-lock"></i>
-                  <input
-                    type="password"
-                    placeholder="Enter your password"
-                    value={loginData.password}
-                    onChange={(e) =>
-                      setLoginData({ ...loginData, password: e.target.value })
-                    }
-                    required
-                  />
+                <div className="auth-form-group">
+                  <label>Password</label>
+                  <div className="input-with-icon password-input">
+                    <i className="bi bi-lock"></i>
+                    <input 
+                      type={showPassword.login ? "text" : "password"}
+                      placeholder="Enter your password" 
+                      value={loginData.password} 
+                      onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} 
+                      required 
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle"
+                      onClick={() => setShowPassword({ ...showPassword, login: !showPassword.login })}
+                    >
+                      <i className={showPassword.login ? "bi bi-eye-slash" : "bi bi-eye"}></i>
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <div className="auth-form-footer">
-                <label className="remember-me">
-                  <input type="checkbox" /> Remember me
-                </label>
-                <a href="#" className="forgot-password">
-                  Forgot password?
-                </a>
-              </div>
-
-              <button type="submit" className="auth-submit-btn" disabled={loading}>
-                {loading ? (
-                  <>
-                    <span className="spinner"></span> Logging in...
-                  </>
-                ) : (
-                  <>
-                    Login <i className="bi bi-arrow-right"></i>
-                  </>
-                )}
-              </button>
-            </form>
-          ) : (
-            /* Register Form */
-            <form className="auth-form" onSubmit={handleRegisterSubmit}>
-              <div className="auth-form-group">
-                <label>Full Name</label>
-                <div className="input-with-icon">
-                  <i className="bi bi-person"></i>
-                  <input
-                    type="text"
-                    placeholder="Enter your full name"
-                    value={registerData.fullName}
-                    onChange={(e) =>
-                      setRegisterData({ ...registerData, fullName: e.target.value })
-                    }
-                    required
-                  />
+                <div className="auth-form-footer">
+                  <label className="remember-me">
+                    <input type="checkbox" /> Remember me
+                  </label>
+                  <a href="#" className="forgot-password">Forgot password?</a>
                 </div>
-              </div>
 
-              <div className="auth-form-group">
-                <label>Email</label>
-                <div className="input-with-icon">
-                  <i className="bi bi-envelope"></i>
-                  <input
-                    type="email"
-                    placeholder="Enter your email"
-                    value={registerData.email}
-                    onChange={(e) =>
-                      setRegisterData({ ...registerData, email: e.target.value })
-                    }
-                    required
-                  />
+                <button type="submit" className="auth-submit-btn" disabled={loading}>
+                  {loading ? (
+                    <>
+                      <span className="spinner"></span> Logging in...
+                    </>
+                  ) : (
+                    <>
+                      Login <i className="bi bi-arrow-right"></i>
+                    </>
+                  )}
+                </button>
+              </form>
+            ) : (
+              <form className="auth-form" onSubmit={handleRegisterSubmit}>
+                <div className="auth-form-group">
+                  <label>Full Name</label>
+                  <div className="input-with-icon">
+                    <i className="bi bi-person"></i>
+                    <input 
+                      type="text" 
+                      placeholder="Enter your full name" 
+                      value={registerData.fullName} 
+                      onChange={(e) => setRegisterData({ ...registerData, fullName: e.target.value })} 
+                      required 
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className="auth-form-group">
-                <label>Phone Number</label>
-                <div className="input-with-icon">
-                  <i className="bi bi-telephone"></i>
-                  <input
-                    type="tel"
-                    placeholder="+84938121001"
-                    value={registerData.phoneNumber}
-                    onChange={(e) =>
-                      setRegisterData({ ...registerData, phoneNumber: e.target.value })
-                    }
-                    required
-                  />
+                <div className="auth-form-group">
+                  <label>Username</label>
+                  <div className="input-with-icon">
+                    <i className="bi bi-person-badge"></i>
+                    <input 
+                      type="text" 
+                      placeholder="Choose a username" 
+                      value={registerData.username} 
+                      onChange={(e) => setRegisterData({ ...registerData, username: e.target.value })} 
+                      required 
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className="auth-form-group">
-                <label>Password</label>
-                <div className="input-with-icon">
-                  <i className="bi bi-lock"></i>
-                  <input
-                    type="password"
-                    placeholder="Create a password"
-                    value={registerData.password}
-                    onChange={(e) =>
-                      setRegisterData({ ...registerData, password: e.target.value })
-                    }
-                    required
-                  />
+                <div className="auth-form-group">
+                  <label>Email</label>
+                  <div className="input-with-icon">
+                    <i className="bi bi-envelope"></i>
+                    <input 
+                      type="email" 
+                      placeholder="Enter your email" 
+                      value={registerData.email} 
+                      onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })} 
+                      required 
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className="auth-form-group">
-                <label>Confirm Password</label>
-                <div className="input-with-icon">
-                  <i className="bi bi-lock-fill"></i>
-                  <input
-                    type="password"
-                    placeholder="Confirm your password"
-                    value={registerData.confirmPassword}
-                    onChange={(e) =>
-                      setRegisterData({ ...registerData, confirmPassword: e.target.value })
-                    }
-                    required
-                  />
+                <div className="auth-form-group">
+                  <label>Phone Number</label>
+                  <div className="input-with-icon">
+                    <i className="bi bi-telephone"></i>
+                    <input 
+                      type="tel" 
+                      placeholder="+84 938 121 001" 
+                      value={registerData.phoneNumber} 
+                      onChange={handlePhoneChange}
+                      maxLength={16}
+                      required 
+                    />
+                  </div>
+                  <small className="input-hint">Start with 0 or +84</small>
                 </div>
-              </div>
 
-              <button type="submit" className="auth-submit-btn" disabled={loading}>
-                {loading ? (
-                  <>
-                    <span className="spinner"></span> Creating account...
-                  </>
-                ) : (
-                  <>
-                    Create Account <i className="bi bi-arrow-right"></i>
-                  </>
-                )}
-              </button>
-            </form>
-          )}
+                <div className="auth-form-group">
+                  <label>Password</label>
+                  <div className="input-with-icon password-input">
+                    <i className="bi bi-lock"></i>
+                    <input 
+                      type={showPassword.register ? "text" : "password"}
+                      placeholder="Create a password (min 6 characters)" 
+                      value={registerData.password} 
+                      onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })} 
+                      minLength={6}
+                      required 
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle"
+                      onClick={() => setShowPassword({ ...showPassword, register: !showPassword.register })}
+                    >
+                      <i className={showPassword.register ? "bi bi-eye-slash" : "bi bi-eye"}></i>
+                    </button>
+                  </div>
+                </div>
 
-          {/* Social Login */}
-          <div className="auth-divider">
-            <span>Or continue with</span>
-          </div>
+                <div className="auth-form-group">
+                  <label>Confirm Password</label>
+                  <div className="input-with-icon password-input">
+                    <i className="bi bi-lock-fill"></i>
+                    <input 
+                      type={showPassword.confirm ? "text" : "password"}
+                      placeholder="Confirm your password" 
+                      value={registerData.confirmPassword} 
+                      onChange={(e) => setRegisterData({ ...registerData, confirmPassword: e.target.value })} 
+                      minLength={6}
+                      required 
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle"
+                      onClick={() => setShowPassword({ ...showPassword, confirm: !showPassword.confirm })}
+                    >
+                      <i className={showPassword.confirm ? "bi bi-eye-slash" : "bi bi-eye"}></i>
+                    </button>
+                  </div>
+                </div>
 
-          <div className="social-login">
-            <button className="social-btn google">
-              <i className="bi bi-google"></i> Google
-            </button>
-            <button className="social-btn facebook">
-              <i className="bi bi-facebook"></i> Facebook
-            </button>
+                <button type="submit" className="auth-submit-btn" disabled={loading}>
+                  {loading ? (
+                    <>
+                      <span className="spinner"></span> Creating account...
+                    </>
+                  ) : (
+                    <>
+                      Create Account <i className="bi bi-arrow-right"></i>
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
